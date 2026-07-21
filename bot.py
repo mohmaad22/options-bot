@@ -61,6 +61,8 @@ def fetch_data(ticker: str, period: str = "3mo", interval: str = "1d") -> pd.Dat
     df = yf.download(ticker, period=period, interval=interval, progress=False)
     if df.empty:
         return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     df["EMA_FAST"] = df["Close"].ewm(span=EMA_FAST, adjust=False).mean()
     df["EMA_SLOW"] = df["Close"].ewm(span=EMA_SLOW, adjust=False).mean()
     df["EMA_TREND"] = df["Close"].ewm(span=EMA_TREND, adjust=False).mean()
@@ -102,18 +104,18 @@ def evaluate_signal(df: pd.DataFrame) -> dict:
     if bullish_cross and uptrend and volume_spike and last["RSI"] < RSI_UPPER:
         signal = "bullish"
         reasons = [
-            f"EMA{EMA_FAST} cut above EMA{EMA_SLOW}",
-            f"Price above EMA{EMA_TREND} (uptrend)",
-            f"Volume {last['Volume']/last['VOL_AVG20']:.1f}x average",
-            f"RSI={last['RSI']:.1f} (not overbought)",
+            f"EMA{EMA_FAST} قطع فوق EMA{EMA_SLOW}",
+            f"السعر فوق EMA{EMA_TREND} (اتجاه صاعد)",
+            f"الفوليوم {last['Volume']/last['VOL_AVG20']:.1f}x المعدل",
+            f"RSI={last['RSI']:.1f} (مو overbought)",
         ]
     elif bearish_cross and downtrend and volume_spike and last["RSI"] > RSI_LOWER:
         signal = "bearish"
         reasons = [
-            f"EMA{EMA_FAST} cut below EMA{EMA_SLOW}",
-            f"Price below EMA{EMA_TREND} (downtrend)",
-            f"Volume {last['Volume']/last['VOL_AVG20']:.1f}x average",
-            f"RSI={last['RSI']:.1f} (not oversold)",
+            f"EMA{EMA_FAST} قطع تحت EMA{EMA_SLOW}",
+            f"السعر تحت EMA{EMA_TREND} (اتجاه هابط)",
+            f"الفوليوم {last['Volume']/last['VOL_AVG20']:.1f}x المعدل",
+            f"RSI={last['RSI']:.1f} (مو oversold)",
         ]
 
     return {
@@ -135,18 +137,17 @@ async def send_alert(app: Application, ticker: str, result: dict):
     price = result["price"]
     reasons = "\n".join(f"  • {r}" for r in result["reasons"])
     strike, expiry = suggest_option_params(price)
-    direction = "CALL (bullish)" if signal == "bullish" else "PUT (bearish)"
+    direction = "CALL (شراء - صاعد)" if signal == "bullish" else "PUT (بيع - هابط)"
 
     text = (
-        f"🔔 *{ticker}* — possible *{direction}* setup\n\n"
-        f"Price: ${price:.2f}\n"
-        f"Reasons:\n{reasons}\n\n"
-        f"Rough reference only — near-the-money strike ≈ {strike}, "
-        f"expiry ≈ {expiry}.\n"
-        f"⚠️ Check the real option chain yourself (spread, open interest, IV) "
-        f"before doing anything. This is an alert, not a trade. Verify and "
-        f"execute manually.\n"
-        f"⚠️ Not financial advice. No win-rate is guaranteed."
+        f"🔔 *{ticker}* — احتمال فرصة *{direction}*\n\n"
+        f"السعر: ${price:.2f}\n"
+        f"الأسباب:\n{reasons}\n\n"
+        f"مرجع تقريبي فقط — سعر تنفيذ قريب من السعر الحالي ≈ {strike}, "
+        f"تاريخ انتهاء تقريبي ≈ {expiry}.\n"
+        f"⚠️ تأكد بنفسك من سلسلة الأوبشنز الفعلية (الفرق بين سعري البيع والشراء، "
+        f"عدد العقود المفتوحة) قبل أي خطوة. هذا تنبيه فقط مو صفقة. راجع ونفذ يدويًا.\n"
+        f"⚠️ هذا مو نصيحة مالية. ما فيه ضمان لأي نسبة نجاح."
     )
     await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode="Markdown")
 
@@ -180,13 +181,13 @@ async def scan_loop(app: Application):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Signal alert bot running.\n"
-        f"Watching: {', '.join(WATCHLIST)}\n\n"
-        "Commands:\n"
-        "/status – check current indicator readout for the watchlist\n"
-        "/add TICKER – add a ticker to the watchlist\n"
-        "/remove TICKER – remove a ticker\n\n"
-        "This bot ONLY sends alerts. It never places trades."
+        "بوت التنبيهات شغال ✅\n"
+        f"يراقب: {', '.join(WATCHLIST)}\n\n"
+        "الأوامر:\n"
+        "/status – قراءة حالية للمؤشرات على القائمة\n"
+        "/add TICKER – إضافة رمز للقائمة\n"
+        "/remove TICKER – حذف رمز من القائمة\n\n"
+        "هذا البوت يرسل تنبيهات فقط. ما ينفذ أي صفقة أبدًا."
     )
 
 
@@ -196,42 +197,42 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             df = fetch_data(ticker)
             if df.empty:
-                lines.append(f"{ticker}: no data")
+                lines.append(f"{ticker}: لا توجد بيانات")
                 continue
             last = df.iloc[-1]
-            liquid = "✅" if passes_liquidity_filter(df) else "⚠️ low liquidity"
+            liquid = "✅" if passes_liquidity_filter(df) else "⚠️ سيولة ضعيفة"
             lines.append(
                 f"*{ticker}* {liquid} — ${last['Close']:.2f} | "
                 f"RSI {last['RSI']:.1f} | "
                 f"EMA{EMA_FAST}/{EMA_SLOW}: {last['EMA_FAST']:.2f}/{last['EMA_SLOW']:.2f}"
             )
         except Exception as e:
-            lines.append(f"{ticker}: error ({e})")
+            lines.append(f"{ticker}: خطأ ({e})")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /add TICKER")
+        await update.message.reply_text("الاستخدام: /add TICKER")
         return
     ticker = context.args[0].upper()
     if ticker not in WATCHLIST:
         WATCHLIST.append(ticker)
-        await update.message.reply_text(f"Added {ticker} to watchlist.")
+        await update.message.reply_text(f"تمت إضافة {ticker} للقائمة.")
     else:
-        await update.message.reply_text(f"{ticker} already in watchlist.")
+        await update.message.reply_text(f"{ticker} موجود بالقائمة أصلاً.")
 
 
 async def cmd_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /remove TICKER")
+        await update.message.reply_text("الاستخدام: /remove TICKER")
         return
     ticker = context.args[0].upper()
     if ticker in WATCHLIST:
         WATCHLIST.remove(ticker)
-        await update.message.reply_text(f"Removed {ticker} from watchlist.")
+        await update.message.reply_text(f"تم حذف {ticker} من القائمة.")
     else:
-        await update.message.reply_text(f"{ticker} not in watchlist.")
+        await update.message.reply_text(f"{ticker} مو موجود بالقائمة.")
 
 
 async def post_init(app: Application):
